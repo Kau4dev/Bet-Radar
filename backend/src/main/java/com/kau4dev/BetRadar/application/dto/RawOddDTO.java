@@ -2,6 +2,8 @@ package com.kau4dev.BetRadar.application.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.time.Instant;
+
 public record RawOddDTO(
         String bookmaker,
 
@@ -15,7 +17,7 @@ public record RawOddDTO(
         String teamAway,
 
         OddsDTO odds,
-        Long timestamp
+        Instant timestamp
 ) {
     public record OddsDTO(
             @JsonProperty("home_win")
