@@ -1,9 +1,12 @@
 package com.kau4dev.BetRadar.domain.repository;
 
-import com.kau4dev.BetRadar.infrastructure.entity.OddHistoryEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.kau4dev.BetRadar.domain.model.OddHistory;
 
-import java.util.UUID;
+import java.util.List;
 
-public interface OddHistoryRepository extends JpaRepository<OddHistoryEntity, UUID> {
+public interface OddHistoryRepository {
+
+    List<OddHistory> findLatestOddsForEachBookmaker(String matchId);
+
+    OddHistory save(OddHistory oddHistory);
 }

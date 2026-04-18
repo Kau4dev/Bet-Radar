@@ -1,19 +1,18 @@
 package com.kau4dev.BetRadar.application.service;
 
 import com.kau4dev.BetRadar.application.dto.RawOddDTO;
+import com.kau4dev.BetRadar.domain.model.Bookmaker;
+import com.kau4dev.BetRadar.domain.model.Match;
+import com.kau4dev.BetRadar.domain.model.OddHistory;
 import com.kau4dev.BetRadar.domain.repository.BookmakerRepository;
 import com.kau4dev.BetRadar.domain.repository.MatchRepository;
 import com.kau4dev.BetRadar.domain.repository.OddHistoryRepository;
-import com.kau4dev.BetRadar.infrastructure.entity.BookmakerEntity;
-import com.kau4dev.BetRadar.infrastructure.entity.MatchEntity;
-import com.kau4dev.BetRadar.infrastructure.entity.OddHistoryEntity;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.text.Normalizer;
-import java.util.*;
-
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OddProcessorService {
@@ -21,71 +20,39 @@ public class OddProcessorService {
     private final BookmakerRepository bookmakerRepository;
     private final MatchRepository matchRepository;
     private final OddHistoryRepository oddHistoryRepository;
+    private final MarketAnalyzerService marketAnalyzerService;
 
+    private final TeamNormalizationService normalizer;
 
     @Transactional
-    public void processAndStore(RawOddDTO rawOddDTO){
+    public void processAndStore(RawOddDTO dto) {
+        log.debug("Processando DTO recebido: {}", dto.matchId());
 
-        BookmakerEntity bookmaker = bookmakerRepository.findByName(rawOddDTO.bookmaker())
-                .orElseGet(() -> bookmakerRepository.save(
-                        BookmakerEntity.builder().name(rawOddDTO.bookmaker()).build()
+        String cleanTeamHome = normalizer.normalize(dto.teamHome());
+        String cleanTeamAway = normalizer.normalize(dto.teamAway());
+        String universalMatchId = cleanTeamHome + "_v_" + cleanTeamAway;
 
-                ));
+        Bookmaker bookmaker = bookmakerRepository.findByName(dto.bookmaker())
+                .orElseGet(() -> bookmakerRepository.save(new Bookmaker(null, dto.bookmaker())));
 
-        MatchEntity match = matchRepository.findById(rawOddDTO.matchId())
-                .orElseGet(() -> matchRepository.save(
-                        MatchEntity.builder()
-                                .id(rawOddDTO.matchId())
-                                .teamHome(rawOddDTO.teamHome())
-                                .teamAway(rawOddDTO.teamAway())
-                                .build()
-                ));
-        OddHistoryEntity history = OddHistoryEntity.builder()
-                .match(match)
-                .bookmaker(bookmaker)
-                .homeWinOdd(rawOddDTO.odds().homeWin())
-                .drawOdd(rawOddDTO.odds().draw())
-                .awayWinOdd(rawOddDTO.odds().awayWin())
-                .timestamp(rawOddDTO.timestamp())
-                .build();
+        Match match = matchRepository.findById(universalMatchId)
+                .orElseGet(() -> matchRepository.save(new Match(universalMatchId, cleanTeamHome, cleanTeamAway)));
+
+        OddHistory history = new OddHistory(
+                null,
+                dto.odds().homeWin(),
+                dto.odds().draw(),
+                dto.odds().awayWin(),
+                dto.timestamp(),
+                match,
+                bookmaker
+        );
 
         oddHistoryRepository.save(history);
-    }
+        log.info("Cotacao salva com sucesso para o jogo: {}", universalMatchId);
 
-    
-    private static final Set<String> NOISE_TOKENS = Set.of(
-            "fc", "sc", "ac", "cf", "club", "clube", "esporte", "sport"
-    );
-
-    private static final Map<String, String> TOKEN_ALIASES = Map.of(
-            "s", "sao",
-            "st", "saint"
-    );
-
-    public String normalizeTeamNames(String rawName) {
-        if (rawName == null || rawName.isBlank()) {
-            return "";
-        }
-
-        String normalized = Normalizer.normalize(rawName, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}+", "")
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", " ")
-                .trim();
-
-        if (normalized.isEmpty()) {
-            return "";
-        }
-
-        List<String> canonicalTokens = new ArrayList<>();
-        for (String token : normalized.split("\\s+")) {
-            String canonical = TOKEN_ALIASES.getOrDefault(token, token);
-            if (!NOISE_TOKENS.contains(canonical)) {
-                canonicalTokens.add(canonical);
-            }
-        }
-
-        return String.join("_", canonicalTokens);
+        marketAnalyzerService.calculateExpectedValue(universalMatchId, dto.odds().homeWin(), 0.10);
+        marketAnalyzerService.detectSurebet(universalMatchId);
     }
 
 }

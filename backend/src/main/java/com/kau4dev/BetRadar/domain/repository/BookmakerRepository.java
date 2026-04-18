@@ -1,12 +1,12 @@
 package com.kau4dev.BetRadar.domain.repository;
 
-import com.kau4dev.BetRadar.infrastructure.entity.BookmakerEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.kau4dev.BetRadar.domain.model.Bookmaker;
 
 import java.util.Optional;
-import java.util.UUID;
 
-public interface BookmakerRepository extends JpaRepository<BookmakerEntity, UUID> {
+public interface BookmakerRepository {
 
-    Optional<BookmakerEntity> findByName(String name);
+    Optional<Bookmaker> findByName(String name);
+
+    Bookmaker save(Bookmaker bookmaker);
 }

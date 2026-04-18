@@ -1,8 +1,12 @@
 package com.kau4dev.BetRadar.domain.repository;
 
-import com.kau4dev.BetRadar.infrastructure.entity.MatchEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.kau4dev.BetRadar.domain.model.Match;
 
+import java.util.Optional;
 
-public interface MatchRepository extends JpaRepository<MatchEntity, String> {
+public interface MatchRepository {
+
+    Optional<Match> findById(String id);
+
+    Match save(Match match);
 }

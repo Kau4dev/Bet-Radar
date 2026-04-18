@@ -10,7 +10,7 @@ public class TeamNormalizationService {
     private final Map<String, String> teamAliases = new ConcurrentHashMap<>();
 
     public TeamNormalizationService() {
-        // Populando alguns exemplos de dicionário de sinônimos
+
         teamAliases.put("r. madrid", "Real Madrid");
         teamAliases.put("real madrid fc", "Real Madrid");
         teamAliases.put("barca", "Barcelona");
