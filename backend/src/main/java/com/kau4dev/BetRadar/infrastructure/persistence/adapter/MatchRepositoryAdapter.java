@@ -7,6 +7,7 @@ import com.kau4dev.BetRadar.infrastructure.persistence.repository.MatchJpaReposi
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -18,6 +19,11 @@ public class MatchRepositoryAdapter implements MatchRepository {
     @Override
     public Optional<Match> findById(String id) {
         return jpaRepository.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    public List<Match> findAll() {
+        return jpaRepository.findAll().stream().map(this::toDomain).toList();
     }
 
     @Override

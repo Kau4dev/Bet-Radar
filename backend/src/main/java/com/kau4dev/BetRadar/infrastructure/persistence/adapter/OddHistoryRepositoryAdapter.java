@@ -28,7 +28,14 @@ public class OddHistoryRepositoryAdapter implements OddHistoryRepository {
                 .toList();
     }
 
-
+    // puxar com querry dps
+    @Override
+    public List<OddHistory> findAll(){
+        return jpaRepository.findAll()
+                .stream()
+                .map(this::toDomain)
+                .toList();
+    }
 
     @Override
     public OddHistory save(OddHistory oddHistory) {
