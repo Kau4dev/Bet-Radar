@@ -20,7 +20,6 @@ public class AlertEntity {
     @Column(nullable = false)
     private String type;
 
-
     private String description;
 
     @Column(name = "profit_margin" , nullable = false)

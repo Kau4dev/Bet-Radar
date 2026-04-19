@@ -14,6 +14,7 @@ import java.util.List;
 public class MarketAnalyzerService {
 
     private final OddHistoryRepository oddHistoryRepository;
+    private final AlertDispatcherService alertDispatcherService;
 
     /**
      * Calcula se a odd atual de uma casa está muito acima da média do mercado.
@@ -34,9 +35,14 @@ public class MarketAnalyzerService {
         double discrepancy = (currentOdd / averageMarketOdd) - 1;
 
         if (discrepancy >= threshold) {
-            log.info("🔥 OPORTUNIDADE DETECTADA: EV+ de {}% no jogo {}",
-                    Math.round(discrepancy * 100), matchId);
+            alertDispatcherService.dispatchOpportunity(
+                    matchId,
+                    "EV_PLUS",
+                    "Odd da casa acima da media do mercado",
+                    discrepancy * 100
+            );
         }
+
     }
 
     /**
@@ -56,8 +62,13 @@ public class MarketAnalyzerService {
 
         if (arbitrageIndex < 1.0) {
             double profitMargin = (1 - arbitrageIndex) * 100;
-            log.info("💰 SUREBET ENCONTRADA! Lucro garantido de {}% no jogo {}",
-                    String.format("%.2f", profitMargin), matchId);
+            alertDispatcherService.dispatchOpportunity(
+                    matchId,
+                    "SUREBET",
+                    "Arbitragem detectada cobrindo 1X2",
+                    profitMargin
+            );
         }
+
     }
 }

@@ -28,7 +28,7 @@ public class AlertDispatcherService {
         );
         alertRepository.save(alert);
 
-        // 2. Log ou Integração Externa (Ex: Bot de Telegram)
         log.info("📢 ALERTA ENVIADO: [{}] {} - Margem: {}%", type, desc, String.format("%.2f", margin));
     }
+
 }

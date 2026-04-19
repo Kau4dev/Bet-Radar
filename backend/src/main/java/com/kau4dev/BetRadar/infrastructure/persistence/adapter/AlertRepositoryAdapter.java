@@ -7,11 +7,18 @@ import com.kau4dev.BetRadar.infrastructure.persistence.repository.AlertJpaReposi
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Repository
 @RequiredArgsConstructor
 public class AlertRepositoryAdapter implements AlertRepository {
 
     private final AlertJpaRepository jpaRepository;
+
+    @Override
+    public List<Alert> findAll() {
+        return jpaRepository.findAll().stream().map(this::toDomain).toList();
+    }
 
     @Override
     public Alert save(Alert alert) {
