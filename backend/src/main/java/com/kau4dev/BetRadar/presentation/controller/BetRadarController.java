@@ -46,8 +46,8 @@ public class BetRadarController {
             @PathVariable String id,
             @RequestParam(defaultValue = "24") int hours)
     {
-        List<OddHistoryResponse> oddHistoryReponses = matchQueryService.getOddTimeline(id, hours);
-        return ResponseEntity.status(200).body(oddHistoryReponses);
+        List<OddHistoryResponse> oddHistoryResponses= matchQueryService.getOddTimeline(id, hours);
+        return ResponseEntity.status(200).body(oddHistoryResponses);
     }
 
 }

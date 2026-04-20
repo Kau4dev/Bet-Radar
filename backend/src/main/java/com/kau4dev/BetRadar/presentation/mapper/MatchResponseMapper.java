@@ -10,9 +10,10 @@ import java.util.List;
 
 @Mapper(componentModel = "spring")
 public interface MatchResponseMapper {
+
     MatchResponse toMatchResponse(Match match);
+
     List<MatchResponse> toMatchResponseList(List<Match> matches);
 
     OddHistoryResponse toOddHistoryResponse(OddHistory oddHistory);
-    List<OddHistoryResponse> toOddHistoryResponseList(List<OddHistory> list);
 }

@@ -2,6 +2,9 @@ package com.kau4dev.BetRadar.application.service;
 
 import com.kau4dev.BetRadar.domain.model.Alert;
 import com.kau4dev.BetRadar.domain.repository.AlertRepository;
+import com.kau4dev.BetRadar.presentation.mapper.AlertResponseMapper;
+import com.kau4dev.BetRadar.presentation.response.AlertResponse;
+import com.kau4dev.BetRadar.presentation.response.CreateAlertRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -12,17 +15,19 @@ import java.time.Instant;
 public class AlertCommandService {
 
     private final AlertRepository alertRepository;
+    private final AlertResponseMapper alertResponseMapper;
 
-    public Alert createAlert(Alert alert) {
+    public AlertResponse createAlert(CreateAlertRequest request) {
         Alert alertToSave = new Alert(
-                null, // deixa o banco gerar ID
-                alert.matchId(),
-                alert.type(),
-                alert.description(),
-                alert.profitMargin(),
-                alert.createdAt() != null ? alert.createdAt() : Instant.now()
+                null,
+                request.matchId(),
+                request.type(),
+                request.description(),
+                request.profitMargin(),
+                Instant.now()
         );
-        return alertRepository.save(alertToSave);
+
+        return alertResponseMapper.toAlertResponse(alertRepository.save(alertToSave));
     }
 
 }
