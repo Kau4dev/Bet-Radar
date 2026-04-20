@@ -2,7 +2,6 @@ package com.kau4dev.BetRadar.presentation.mapper;
 
 import com.kau4dev.BetRadar.domain.model.Alert;
 import com.kau4dev.BetRadar.presentation.response.AlertResponse;
-import com.kau4dev.BetRadar.presentation.response.CreateAlertRequest;
 import org.mapstruct.Mapper;
 
 import java.util.List;
