@@ -3,10 +3,13 @@ package com.kau4dev.BetRadar.presentation.controller;
 import com.kau4dev.BetRadar.application.service.AlertCommandService;
 import com.kau4dev.BetRadar.application.service.AlertQueryService;
 import com.kau4dev.BetRadar.application.service.MatchQueryService;
-import com.kau4dev.BetRadar.domain.model.Alert;
-import com.kau4dev.BetRadar.domain.model.Match;
-import com.kau4dev.BetRadar.domain.model.OddHistory;
+import com.kau4dev.BetRadar.presentation.response.AlertResponse;
+import com.kau4dev.BetRadar.presentation.response.CreateAlertRequest;
+import com.kau4dev.BetRadar.presentation.response.MatchResponse;
+import com.kau4dev.BetRadar.presentation.response.OddHistoryResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,25 +24,30 @@ public class BetRadarController {
     private final AlertQueryService alertQueryService;
 
     @PostMapping("/alerts")
-    public Alert createAlert(@RequestBody Alert alert) {
-        return alertCommandService.createAlert(alert);
+    public ResponseEntity<AlertResponse> createAlert(@Valid @RequestBody CreateAlertRequest request) {
+        AlertResponse alertRequest = alertCommandService.createAlert(request);
+        return ResponseEntity.status(201).body(alertRequest);
     }
 
     @GetMapping("/opportunities")
-    public List<Alert> getRecentOpportunities() {
-        return alertQueryService.getRecentOpportunities();
+    public ResponseEntity<List<AlertResponse>> getRecentOpportunities() {
+        List<AlertResponse> alertResponse = alertQueryService.getRecentOpportunities();
+        return ResponseEntity.status(200).body(alertResponse);
     }
 
     @GetMapping("/matches")
-    public List<Match> getMatches() {
-        return matchQueryService.getActiveMatchesWithOdds();
+    public ResponseEntity<List<MatchResponse>> getMatches() {
+        List<MatchResponse> matchResponse = matchQueryService.getActiveMatchesWithOdds();
+        return ResponseEntity.status(200).body(matchResponse);
     }
 
     @GetMapping("/matches/{id}/timeline")
-    public List<OddHistory> getMatchHistory(
+    public ResponseEntity<List<OddHistoryResponse>>getMatchHistory(
             @PathVariable String id,
-            @RequestParam(defaultValue = "24") int hours) {
-        return matchQueryService.getOddTimeline(id, hours);
+            @RequestParam(defaultValue = "24") int hours)
+    {
+        List<OddHistoryResponse> oddHistoryReponses = matchQueryService.getOddTimeline(id, hours);
+        return ResponseEntity.status(200).body(oddHistoryReponses);
     }
 
 }
