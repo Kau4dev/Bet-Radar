@@ -3,6 +3,7 @@ package com.kau4dev.BetRadar.infrastructure.persistence.adapter;
 import com.kau4dev.BetRadar.domain.model.Match;
 import com.kau4dev.BetRadar.domain.repository.MatchRepository;
 import com.kau4dev.BetRadar.infrastructure.entity.MatchEntity;
+import com.kau4dev.BetRadar.infrastructure.persistence.mapper.MatchPersistenceMapper;
 import com.kau4dev.BetRadar.infrastructure.persistence.repository.MatchJpaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -15,33 +16,25 @@ import java.util.Optional;
 public class MatchRepositoryAdapter implements MatchRepository {
 
     private final MatchJpaRepository jpaRepository;
+    private final MatchPersistenceMapper mapper;
 
     @Override
     public Optional<Match> findById(String id) {
-        return jpaRepository.findById(id).map(this::toDomain);
+        return jpaRepository.findById(id)
+                .map(mapper::toDomain);
     }
 
     @Override
     public List<Match> findAll() {
-        return jpaRepository.findAll().stream().map(this::toDomain).toList();
+        return mapper.toDomainList(jpaRepository.findAll());
     }
 
     @Override
     public Match save(Match match) {
-        MatchEntity saved = jpaRepository.save(toEntity(match));
-        return toDomain(saved);
+        MatchEntity entity = mapper.toEntity(match);
+        MatchEntity savedEntity = jpaRepository.save(entity);
+        return mapper.toDomain(savedEntity);
     }
 
-    private Match toDomain(MatchEntity entity) {
-        return new Match(entity.getId(), entity.getTeamHome(), entity.getTeamAway());
-    }
-
-    private MatchEntity toEntity(Match domain) {
-        return MatchEntity.builder()
-                .id(domain.id())
-                .teamHome(domain.teamHome())
-                .teamAway(domain.teamAway())
-                .build();
-    }
 }
 
