@@ -8,6 +8,7 @@ import java.util.List;
 
 @Mapper(componentModel = "spring")
 public interface MatchPersistenceMapper {
+
     Match toDomain(MatchEntity entity);
     MatchEntity toEntity(Match domain);
     List<Match> toDomainList(List<MatchEntity> entities);
