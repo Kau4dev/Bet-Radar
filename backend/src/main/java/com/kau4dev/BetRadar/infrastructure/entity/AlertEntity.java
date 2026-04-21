@@ -18,7 +18,8 @@ public class AlertEntity {
     private String matchId;
 
     @Column(nullable = false)
-    private String type;
+    @Enumerated(EnumType.STRING)
+    private AlertType type;
 
     private String description;
 

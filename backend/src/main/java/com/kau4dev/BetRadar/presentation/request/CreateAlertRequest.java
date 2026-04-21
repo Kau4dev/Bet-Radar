@@ -1,4 +1,4 @@
-package com.kau4dev.BetRadar.presentation.response;
+package com.kau4dev.BetRadar.presentation.request;
 
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;

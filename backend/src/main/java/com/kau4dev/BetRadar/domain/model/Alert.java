@@ -6,7 +6,7 @@ import java.util.UUID;
 public record Alert(
         UUID id,
         String matchId,
-        String type,
+        AlertType type,
         String description,
         Double profitMargin,
         Instant createdAt) {

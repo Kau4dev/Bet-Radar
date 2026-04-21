@@ -10,7 +10,7 @@ import com.kau4dev.BetRadar.presentation.mapper.AlertResponseMapper;
 import com.kau4dev.BetRadar.presentation.mapper.MatchResponseMapper;
 import com.kau4dev.BetRadar.presentation.mapper.OddHistoryResponseMapper;
 import com.kau4dev.BetRadar.presentation.response.AlertResponse;
-import com.kau4dev.BetRadar.presentation.response.CreateAlertRequest;
+import com.kau4dev.BetRadar.presentation.request.CreateAlertRequest;
 import com.kau4dev.BetRadar.presentation.response.MatchResponse;
 import com.kau4dev.BetRadar.presentation.response.OddHistoryResponse;
 import jakarta.validation.Valid;
