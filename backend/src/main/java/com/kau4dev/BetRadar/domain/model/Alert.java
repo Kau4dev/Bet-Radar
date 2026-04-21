@@ -1,5 +1,7 @@
 package com.kau4dev.BetRadar.domain.model;
 
+import com.kau4dev.BetRadar.domain.model.enums.AlertType;
+
 import java.time.Instant;
 import java.util.UUID;
 

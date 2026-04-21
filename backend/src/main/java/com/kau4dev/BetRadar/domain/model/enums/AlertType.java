@@ -1,4 +1,4 @@
-package com.kau4dev.BetRadar.domain.model;
+package com.kau4dev.BetRadar.domain.model.enums;
 
 import com.kau4dev.BetRadar.domain.exception.AlertValidationException;
 

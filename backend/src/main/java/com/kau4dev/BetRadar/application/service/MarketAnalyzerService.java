@@ -1,6 +1,6 @@
 package com.kau4dev.BetRadar.application.service;
 
-import com.kau4dev.BetRadar.domain.model.AlertType;
+import com.kau4dev.BetRadar.domain.model.enums.AlertType;
 import com.kau4dev.BetRadar.domain.model.OddHistory;
 import com.kau4dev.BetRadar.domain.repository.OddHistoryRepository;
 import lombok.RequiredArgsConstructor;

@@ -1,7 +1,7 @@
 package com.kau4dev.BetRadar.infrastructure.persistence.mapper;
 
 import com.kau4dev.BetRadar.domain.model.Alert;
-import com.kau4dev.BetRadar.domain.model.AlertType;
+import com.kau4dev.BetRadar.domain.model.enums.AlertType;
 import com.kau4dev.BetRadar.infrastructure.entity.AlertEntity;
 import org.mapstruct.Mapper;
 

@@ -2,7 +2,7 @@ package com.kau4dev.BetRadar.application.service;
 
 import com.kau4dev.BetRadar.domain.exception.DomainValidationException;
 import com.kau4dev.BetRadar.domain.model.Alert;
-import com.kau4dev.BetRadar.domain.model.AlertType;
+import com.kau4dev.BetRadar.domain.model.enums.AlertType;
 import com.kau4dev.BetRadar.domain.repository.AlertRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

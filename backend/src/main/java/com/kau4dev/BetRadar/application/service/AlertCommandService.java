@@ -3,7 +3,7 @@ package com.kau4dev.BetRadar.application.service;
 import com.kau4dev.BetRadar.domain.exception.AlertValidationException;
 import com.kau4dev.BetRadar.domain.exception.MatchNotFoundException;
 import com.kau4dev.BetRadar.domain.model.Alert;
-import com.kau4dev.BetRadar.domain.model.AlertType;
+import com.kau4dev.BetRadar.domain.model.enums.AlertType;
 import com.kau4dev.BetRadar.domain.repository.AlertRepository;
 import com.kau4dev.BetRadar.domain.repository.MatchRepository;
 import lombok.RequiredArgsConstructor;
