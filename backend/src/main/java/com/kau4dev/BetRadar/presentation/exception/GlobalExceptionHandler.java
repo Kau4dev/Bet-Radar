@@ -1,5 +1,6 @@
 package com.kau4dev.BetRadar.presentation.exception;
 
+import com.kau4dev.BetRadar.domain.exception.AuthenticationFailedException;
 import com.kau4dev.BetRadar.domain.exception.DomainValidationException;
 import com.kau4dev.BetRadar.domain.exception.MatchNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusinessRule(DomainValidationException ex, ServletWebRequest request) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(buildError(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), request, null));
+    }
+
+    @ExceptionHandler(AuthenticationFailedException.class)
+    public ResponseEntity<ErrorResponse> handleAuthenticationFailure(AuthenticationFailedException ex, ServletWebRequest request) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(buildError(HttpStatus.UNAUTHORIZED, ex.getMessage(), request, null));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

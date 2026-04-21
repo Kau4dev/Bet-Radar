@@ -1,6 +1,7 @@
 package com.kau4dev.BetRadar.infrastructure.entity;
 
 
+import com.kau4dev.BetRadar.infrastructure.entity.enums.AlertType;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.Instant;

@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-public record LoginRequest(
+public record CreateUserRequest(
         @NotBlank(message = "username e obrigatorio")
         @Size(min = 3, max = 40, message = "username deve ter entre 3 e 40 caracteres")
         @Pattern(regexp = "^[a-zA-Z0-9._-]+$", message = "username deve conter apenas letras, numeros, ponto, underscore ou hifen")
