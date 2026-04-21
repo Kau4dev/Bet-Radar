@@ -1,6 +1,7 @@
 package com.kau4dev.BetRadar.application.service;
 
 import com.kau4dev.BetRadar.application.dto.RawOddDTO;
+import com.kau4dev.BetRadar.domain.exception.DomainValidationException;
 import com.kau4dev.BetRadar.domain.model.Bookmaker;
 import com.kau4dev.BetRadar.domain.model.Match;
 import com.kau4dev.BetRadar.domain.model.OddHistory;
@@ -26,6 +27,7 @@ public class OddProcessorService {
 
     @Transactional
     public void processAndStore(RawOddDTO dto) {
+        validateInput(dto);
         log.debug("Processando DTO recebido: {}", dto.matchId());
 
         String cleanTeamHome = normalizer.normalize(dto.teamHome());
@@ -55,4 +57,26 @@ public class OddProcessorService {
         marketAnalyzerService.detectSurebet(universalMatchId);
     }
 
+    private void validateInput(RawOddDTO dto) {
+        if (dto == null || dto.odds() == null) {
+            throw new DomainValidationException("payload de odds invalido");
+        }
+
+        if (dto.bookmaker() == null || dto.bookmaker().isBlank()) {
+            throw new DomainValidationException("bookmaker e obrigatorio");
+        }
+
+        if (dto.teamHome() == null || dto.teamHome().isBlank() || dto.teamAway() == null || dto.teamAway().isBlank()) {
+            throw new DomainValidationException("teamHome e teamAway sao obrigatorios");
+        }
+
+        if (dto.timestamp() == null) {
+            throw new DomainValidationException("timestamp e obrigatorio");
+        }
+
+        if (dto.odds().homeWin() == null || dto.odds().draw() == null || dto.odds().awayWin() == null
+                || dto.odds().homeWin() <= 0 || dto.odds().draw() <= 0 || dto.odds().awayWin() <= 0) {
+            throw new DomainValidationException("odds devem ser maiores que 0");
+        }
+    }
 }

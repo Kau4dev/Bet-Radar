@@ -1,5 +1,6 @@
 package com.kau4dev.BetRadar.application.service;
 
+import com.kau4dev.BetRadar.domain.model.AlertType;
 import com.kau4dev.BetRadar.domain.model.OddHistory;
 import com.kau4dev.BetRadar.domain.repository.OddHistoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +38,7 @@ public class MarketAnalyzerService {
         if (discrepancy >= threshold) {
             alertDispatcherService.dispatchOpportunity(
                     matchId,
-                    "EV_PLUS",
+                    AlertType.EV_PLUS,
                     "Odd da casa acima da media do mercado",
                     discrepancy * 100
             );
@@ -64,7 +65,7 @@ public class MarketAnalyzerService {
             double profitMargin = (1 - arbitrageIndex) * 100;
             alertDispatcherService.dispatchOpportunity(
                     matchId,
-                    "SUREBET",
+                    AlertType.SUREBET,
                     "Arbitragem detectada cobrindo 1X2",
                     profitMargin
             );

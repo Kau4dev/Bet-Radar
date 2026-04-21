@@ -1,6 +1,8 @@
 package com.kau4dev.BetRadar.application.service;
 
+import com.kau4dev.BetRadar.domain.exception.DomainValidationException;
 import org.springframework.stereotype.Service;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -15,14 +17,14 @@ public class TeamNormalizationService {
         teamAliases.put("real madrid fc", "Real Madrid");
         teamAliases.put("barca", "Barcelona");
         teamAliases.put("fc barcelona", "Barcelona");
-        teamAliases.put("s. paulo", "São Paulo");
-        teamAliases.put("spfc", "São Paulo");
+        teamAliases.put("s. paulo", "Sao Paulo");
+        teamAliases.put("spfc", "Sao Paulo");
     }
 
 
     public String normalize(String rawName) {
         if (rawName == null || rawName.isBlank()) {
-            throw new IllegalArgumentException("Nome do time não pode ser nulo");
+            throw new DomainValidationException("Nome do time nao pode ser nulo");
         }
 
         String lowerCaseName = rawName.trim().toLowerCase();
