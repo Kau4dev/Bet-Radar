@@ -5,7 +5,7 @@ import com.kau4dev.BetRadar.domain.exception.UserAlreadyExistsException;
 import com.kau4dev.BetRadar.domain.model.User;
 import com.kau4dev.BetRadar.domain.model.enums.UserRole;
 import com.kau4dev.BetRadar.domain.repository.UserRepository;
-import com.kau4dev.BetRadar.infrastructure.config.security.JwtService;
+import com.kau4dev.BetRadar.application.port.out.TokenGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -22,7 +22,7 @@ import java.util.Locale;
 public class AuthService {
 
     private final AuthenticationManager authenticationManager;
-    private final JwtService jwtService;
+    private final TokenGenerator tokenGenerator;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
@@ -33,7 +33,7 @@ public class AuthService {
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(normalizedUsername, password)
             );
-            return jwtService.generateToken(authentication.getName());
+            return tokenGenerator.generateToken(authentication.getName());
         } catch (BadCredentialsException ex) {
             throw new AuthenticationFailedException("Credenciais invalidas");
         }

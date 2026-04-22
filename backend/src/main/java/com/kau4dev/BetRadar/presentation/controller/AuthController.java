@@ -1,7 +1,7 @@
 package com.kau4dev.BetRadar.presentation.controller;
 
 import com.kau4dev.BetRadar.application.service.AuthService;
-import com.kau4dev.BetRadar.domain.model.User;
+import com.kau4dev.BetRadar.presentation.mapper.AuthResponseMapper;
 import com.kau4dev.BetRadar.presentation.request.CreateUserRequest;
 import com.kau4dev.BetRadar.presentation.request.LoginRequest;
 import com.kau4dev.BetRadar.presentation.response.CreateUserResponse;
@@ -24,6 +24,7 @@ import java.util.List;
 public class AuthController {
 
     private final AuthService authService;
+    private final AuthResponseMapper authResponseMapper;
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -33,27 +34,13 @@ public class AuthController {
 
     @PostMapping("/users")
     public ResponseEntity<CreateUserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
-        User createdUser = authService.createUser(request.username(), request.password());
-        return ResponseEntity.status(HttpStatus.CREATED).body(toUserResponse(createdUser));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(authResponseMapper.toCreateUserResponse(authService.createUser(request.username(), request.password())));
     }
 
     @GetMapping("/users")
     public ResponseEntity<List<CreateUserResponse>> getUsers() {
-        List<CreateUserResponse> users = authService.getUsers()
-                .stream()
-                .map(this::toUserResponse)
-                .toList();
-
-        return ResponseEntity.ok(users);
-    }
-
-    private CreateUserResponse toUserResponse(User user) {
-        return new CreateUserResponse(
-            user.id(),
-            user.username(),
-            user.role().name(),
-            user.enabled()
-        );
+        return ResponseEntity.ok(authResponseMapper.toCreateUserResponseList(authService.getUsers()));
     }
 }
 
