@@ -16,6 +16,7 @@ import com.kau4dev.BetRadar.presentation.response.OddHistoryResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -33,6 +34,7 @@ public class BetRadarController {
     private final OddHistoryResponseMapper oddHistoryResponseMapper;
 
     @PostMapping("/alerts")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<AlertResponse> createAlert(@Valid @RequestBody CreateAlertRequest request) {
         Alert alert = alertCommandService.createAlert(
                 request.matchId(),
@@ -45,6 +47,7 @@ public class BetRadarController {
     }
 
     @GetMapping("/opportunities")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<AlertResponse>> getRecentOpportunities() {
         List<Alert> alerts = alertQueryService.getRecentOpportunities();
         List<AlertResponse> alertResponse = alertResponseMapper.toAlertResponseList(alerts);
@@ -52,6 +55,7 @@ public class BetRadarController {
     }
 
     @GetMapping("/matches")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<MatchResponse>> getMatches() {
         List<Match> matches = matchQueryService.getActiveMatchesWithOdds();
         List<MatchResponse> matchResponse = matchResponseMapper.toMatchResponseList(matches);
@@ -59,6 +63,7 @@ public class BetRadarController {
     }
 
     @GetMapping("/matches/{id}/timeline")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<OddHistoryResponse>>getMatchHistory(
             @PathVariable String id,
             @RequestParam(defaultValue = "24") int hours)
