@@ -1,5 +1,6 @@
 package com.kau4dev.BetRadar.infrastructure.config.security;
 
+import com.kau4dev.BetRadar.application.port.out.TokenGenerator;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -12,7 +13,7 @@ import java.util.Date;
 import java.util.function.Function;
 
 @Service
-public class JwtService {
+public class JwtService implements TokenGenerator {
 
     @Value("${security.jwt.secret}")
     private String secretKey;
