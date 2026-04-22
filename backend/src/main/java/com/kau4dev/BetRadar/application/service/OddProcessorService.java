@@ -10,6 +10,7 @@ import com.kau4dev.BetRadar.domain.repository.MatchRepository;
 import com.kau4dev.BetRadar.domain.repository.OddHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class OddProcessorService {
+
+    private static final double EV_THRESHOLD = 0.05;
 
     private final BookmakerRepository bookmakerRepository;
     private final MatchRepository matchRepository;
@@ -26,6 +29,7 @@ public class OddProcessorService {
     private final TeamNormalizationService normalizer;
 
     @Transactional
+    @CacheEvict(cacheNames = {"matches", "timeline", "opportunities"}, allEntries = true)
     public void processAndStore(RawOddDTO dto) {
         validateInput(dto);
         log.debug("Processando DTO recebido: {}", dto.matchId());
@@ -53,7 +57,14 @@ public class OddProcessorService {
         oddHistoryRepository.save(history);
         log.info("Cotacao salva com sucesso para o jogo: {}", universalMatchId);
 
-        marketAnalyzerService.calculateExpectedValue(universalMatchId, dto.odds().homeWin(), 0.10);
+        marketAnalyzerService.calculateExpectedValue(
+                universalMatchId,
+                dto.bookmaker(),
+                dto.odds().homeWin(),
+                dto.odds().draw(),
+                dto.odds().awayWin(),
+                EV_THRESHOLD
+        );
         marketAnalyzerService.detectSurebet(universalMatchId);
     }
 

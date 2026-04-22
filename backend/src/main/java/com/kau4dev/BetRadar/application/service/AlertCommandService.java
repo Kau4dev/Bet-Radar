@@ -7,6 +7,7 @@ import com.kau4dev.BetRadar.domain.model.enums.AlertType;
 import com.kau4dev.BetRadar.domain.repository.AlertRepository;
 import com.kau4dev.BetRadar.domain.repository.MatchRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -18,6 +19,7 @@ public class AlertCommandService {
     private final AlertRepository alertRepository;
     private final MatchRepository matchRepository;
 
+    @CacheEvict(cacheNames = "opportunities", allEntries = true)
     public Alert createAlert(String matchId, String type, String description, Double profitMargin) {
         validateMatchExists(matchId);
 

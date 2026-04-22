@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.function.ToDoubleFunction;
 
 @Slf4j
 @Service
@@ -17,21 +18,50 @@ public class MarketAnalyzerService {
     private final OddHistoryRepository oddHistoryRepository;
     private final AlertDispatcherService alertDispatcherService;
 
-    /**
-     * Calcula se a odd atual de uma casa está muito acima da média do mercado.
-     * @param matchId ID da partida normalizada
-     * @param currentOdd A odd que acabou de chegar
-     * @param threshold Percentual de diferença (ex: 0.10 para 10%)
-     */
-    public void calculateExpectedValue(String matchId, Double currentOdd, Double threshold) {
+    public void calculateExpectedValue(
+            String matchId,
+            String bookmakerName,
+            Double currentHomeOdd,
+            Double currentDrawOdd,
+            Double currentAwayOdd,
+            Double threshold
+    ) {
         List<OddHistory> latestOdds = oddHistoryRepository.findLatestOddsForEachBookmaker(matchId);
 
-        if (latestOdds.size() < 3) return;
+        if (latestOdds.size() < 2) {
+            log.debug("EV ignorado para {}: mercado com poucas casas ({})", matchId, latestOdds.size());
+            return;
+        }
+
+        evaluateOutcomeEv(matchId, bookmakerName, "HOME", currentHomeOdd, threshold, latestOdds, OddHistory::homeWinOdd);
+        evaluateOutcomeEv(matchId, bookmakerName, "DRAW", currentDrawOdd, threshold, latestOdds, OddHistory::drawOdd);
+        evaluateOutcomeEv(matchId, bookmakerName, "AWAY", currentAwayOdd, threshold, latestOdds, OddHistory::awayWinOdd);
+    }
+
+    private void evaluateOutcomeEv(
+            String matchId,
+            String bookmakerName,
+            String outcome,
+            Double currentOdd,
+            Double threshold,
+            List<OddHistory> latestOdds,
+            ToDoubleFunction<OddHistory> extractor
+    ) {
+        if (currentOdd == null || currentOdd <= 0) {
+            return;
+        }
 
         double averageMarketOdd = latestOdds.stream()
-                .mapToDouble(OddHistory::homeWinOdd)
+                .filter(odd -> odd.bookmaker() != null && odd.bookmaker().name() != null)
+                .filter(odd -> bookmakerName == null || !bookmakerName.equalsIgnoreCase(odd.bookmaker().name()))
+                .mapToDouble(extractor)
+                .filter(value -> value > 0)
                 .average()
                 .orElse(0.0);
+
+        if (averageMarketOdd <= 0) {
+            return;
+        }
 
         double discrepancy = (currentOdd / averageMarketOdd) - 1;
 
@@ -39,11 +69,16 @@ public class MarketAnalyzerService {
             alertDispatcherService.dispatchOpportunity(
                     matchId,
                     AlertType.EV_PLUS,
-                    "Odd da casa acima da media do mercado",
+                    "Odd " + outcome + " acima da media do mercado",
                     discrepancy * 100
             );
+            log.info("EV+ detectado [{}] {}: oddAtual={}, media={}, discrepancia={}%%",
+                    outcome,
+                    matchId,
+                    currentOdd,
+                    averageMarketOdd,
+                    String.format("%.2f", discrepancy * 100));
         }
-
     }
 
     /**
@@ -52,6 +87,11 @@ public class MarketAnalyzerService {
      */
     public void detectSurebet(String matchId) {
         List<OddHistory> latestOdds = oddHistoryRepository.findLatestOddsForEachBookmaker(matchId);
+
+        if (latestOdds.size() < 2) {
+            log.debug("Surebet ignorado para {}: mercado com poucas casas ({})", matchId, latestOdds.size());
+            return;
+        }
 
         double bestHome = latestOdds.stream().mapToDouble(OddHistory::homeWinOdd).max().orElse(0.0);
         double bestDraw = latestOdds.stream().mapToDouble(OddHistory::drawOdd).max().orElse(0.0);

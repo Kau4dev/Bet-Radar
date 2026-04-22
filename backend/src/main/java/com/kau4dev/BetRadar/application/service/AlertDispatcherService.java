@@ -6,6 +6,7 @@ import com.kau4dev.BetRadar.domain.model.enums.AlertType;
 import com.kau4dev.BetRadar.domain.repository.AlertRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 
 
@@ -18,6 +19,7 @@ public class AlertDispatcherService {
 
     private final AlertRepository alertRepository;
 
+    @CacheEvict(cacheNames = "opportunities", allEntries = true)
     public void dispatchOpportunity(String matchId, AlertType type, String desc, Double margin) {
         validateDispatchInput(matchId, type, margin);
 

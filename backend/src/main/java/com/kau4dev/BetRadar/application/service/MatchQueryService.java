@@ -7,6 +7,7 @@ import com.kau4dev.BetRadar.domain.model.OddHistory;
 import com.kau4dev.BetRadar.domain.repository.MatchRepository;
 import com.kau4dev.BetRadar.domain.repository.OddHistoryRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -20,10 +21,12 @@ public class MatchQueryService {
     private final MatchRepository matchRepository;
     private final OddHistoryRepository oddHistoryRepository;
 
+    @Cacheable(cacheNames = "matches")
     public List<Match> getActiveMatchesWithOdds() {
         return matchRepository.findAll();
     }
 
+    @Cacheable(cacheNames = "timeline", key = "#matchId + ':' + #hoursBack")
     public List<OddHistory> getOddTimeline(String matchId, int hoursBack) {
         validateTimelineInput(matchId, hoursBack);
 
