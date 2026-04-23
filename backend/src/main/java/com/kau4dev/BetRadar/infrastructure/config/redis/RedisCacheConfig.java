@@ -1,5 +1,10 @@
 package com.kau4dev.BetRadar.infrastructure.config.redis;
 
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
@@ -24,13 +29,32 @@ public class RedisCacheConfig {
             @Value("${app.cache.ttl.timeline-seconds:30}") long timelineTtlSeconds,
             @Value("${app.cache.ttl.opportunities-seconds:15}") long opportunitiesTtlSeconds
     ) {
+        ObjectMapper redisObjectMapper = new ObjectMapper();
+
+        // Suporte a Instant, LocalDate, etc.
+        redisObjectMapper.registerModule(new JavaTimeModule());
+        redisObjectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        // Necessario para deserializar polimorficamente (records, enums, etc.)
+        redisObjectMapper.activateDefaultTyping(
+                BasicPolymorphicTypeValidator.builder()
+                        .allowIfBaseType(Object.class)
+                        .build(),
+                ObjectMapper.DefaultTyping.NON_FINAL,
+                JsonTypeInfo.As.PROPERTY
+        );
+
+        GenericJackson2JsonRedisSerializer serializer =
+                new GenericJackson2JsonRedisSerializer(redisObjectMapper);
+
         RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
-                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                .serializeValuesWith(
+                        RedisSerializationContext.SerializationPair.fromSerializer(serializer))
                 .disableCachingNullValues();
 
         Map<String, RedisCacheConfiguration> cacheConfigs = new HashMap<>();
-        cacheConfigs.put("matches", defaultConfig.entryTtl(Duration.ofSeconds(matchesTtlSeconds)));
-        cacheConfigs.put("timeline", defaultConfig.entryTtl(Duration.ofSeconds(timelineTtlSeconds)));
+        cacheConfigs.put("matches",       defaultConfig.entryTtl(Duration.ofSeconds(matchesTtlSeconds)));
+        cacheConfigs.put("timeline",      defaultConfig.entryTtl(Duration.ofSeconds(timelineTtlSeconds)));
         cacheConfigs.put("opportunities", defaultConfig.entryTtl(Duration.ofSeconds(opportunitiesTtlSeconds)));
 
         return RedisCacheManager.builder(connectionFactory)
@@ -39,4 +63,3 @@ public class RedisCacheConfig {
                 .build();
     }
 }
-
