@@ -31,11 +31,9 @@ public class RedisCacheConfig {
     ) {
         ObjectMapper redisObjectMapper = new ObjectMapper();
 
-        // Suporte a Instant, LocalDate, etc.
         redisObjectMapper.registerModule(new JavaTimeModule());
         redisObjectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-        // Necessario para deserializar polimorficamente (records, enums, etc.)
         redisObjectMapper.activateDefaultTyping(
                 BasicPolymorphicTypeValidator.builder()
                         .allowIfBaseType(Object.class)
