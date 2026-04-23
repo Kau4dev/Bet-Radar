@@ -17,11 +17,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-import static org.mockito.ArgumentMatchers.anyDouble;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class MarketAnalyzerServiceTest {
@@ -56,17 +53,18 @@ class MarketAnalyzerServiceTest {
         @Test
         @DisplayName("Deve ignorar quando mercado tem menos de 2 casas")
         void deveIgnorarQuandoMercadoTemMenosDe2Casas() {
-            doReturn(List.of(odd("Betano", 2.0, 3.0, 3.5))).when(oddHistoryRepository).findLatestOddsForEachBookmaker("m1");
+            doReturn(List.of(odd("Betano", 2.0, 3.0, 3.5)))
+                    .when(oddHistoryRepository).findLatestOddsForEachBookmaker("m1");
 
             service.calculateExpectedValue("m1", "Pinnacle", 2.5, 3.2, 3.6, 0.05);
 
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), eq(""), anyDouble());
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), eq(""), anyDouble());
+            verify(alertDispatcherService, never())
+                    .dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), anyString(), anyDouble());
         }
 
         @Test
-        @DisplayName("Deve disparar EV+ quando discrepancia atingir threshold")
-        void deveDispararEvQuandoDiscrepanciaAtingirThreshold() {
+        @DisplayName("Deve disparar EV+ com bookmaker e outcome na descricao")
+        void deveDispararEvComBookmakerEOutcomeNaDescricao() {
             doReturn(List.of(
                     odd("Betano", 2.0, 3.0, 3.0),
                     odd("Bet365", 2.0, 3.0, 3.0)
@@ -74,7 +72,13 @@ class MarketAnalyzerServiceTest {
 
             service.calculateExpectedValue("m1", "Pinnacle", 2.4, 3.0, 3.0, 0.05);
 
-            verify(alertDispatcherService).dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), eq("Odd HOME acima da media do mercado"), anyDouble());
+            verify(alertDispatcherService).dispatchOpportunity(
+                    eq("m1"),
+                    eq(AlertType.EV_PLUS),
+                    // Mensagem deve conter o outcome e o nome do bookmaker
+                    argThat(desc -> desc.contains("HOME") && desc.contains("Pinnacle")),
+                    anyDouble()
+            );
         }
 
         @Test
@@ -87,7 +91,8 @@ class MarketAnalyzerServiceTest {
 
             service.calculateExpectedValue("m1", "Pinnacle", null, 0.0, -1.0, 0.05);
 
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), eq("Odd HOME acima da media do mercado"), anyDouble());
+            verify(alertDispatcherService, never())
+                    .dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), anyString(), anyDouble());
         }
 
         @Test
@@ -100,7 +105,8 @@ class MarketAnalyzerServiceTest {
 
             service.calculateExpectedValue("m1", "Pinnacle", 2.5, 3.0, 3.0, 0.05);
 
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), eq("Odd HOME acima da media do mercado"), anyDouble());
+            verify(alertDispatcherService, never())
+                    .dispatchOpportunity(eq("m1"), eq(AlertType.EV_PLUS), anyString(), anyDouble());
         }
     }
 
@@ -110,16 +116,18 @@ class MarketAnalyzerServiceTest {
         @Test
         @DisplayName("Deve ignorar surebet com poucas casas")
         void deveIgnorarSurebetComPoucasCasas() {
-            doReturn(List.of(odd("Betano", 2.0, 3.0, 3.0))).when(oddHistoryRepository).findLatestOddsForEachBookmaker("m1");
+            doReturn(List.of(odd("Betano", 2.0, 3.0, 3.0)))
+                    .when(oddHistoryRepository).findLatestOddsForEachBookmaker("m1");
 
             service.detectSurebet("m1");
 
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), eq("Arbitragem detectada cobrindo 1X2"), anyDouble());
+            verify(alertDispatcherService, never())
+                    .dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), anyString(), anyDouble());
         }
 
         @Test
-        @DisplayName("Deve disparar alerta de surebet")
-        void deveDispararAlertaDeSurebet() {
+        @DisplayName("Deve disparar surebet com casas e percentuais na descricao")
+        void deveDispararSurebetComCasasEPercentuaisNaDescricao() {
             doReturn(List.of(
                     odd("Betano", 2.4, 3.6, 4.2),
                     odd("Bet365", 2.5, 3.7, 4.3)
@@ -127,7 +135,18 @@ class MarketAnalyzerServiceTest {
 
             service.detectSurebet("m1");
 
-            verify(alertDispatcherService).dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), eq("Arbitragem detectada cobrindo 1X2"), anyDouble());
+            verify(alertDispatcherService).dispatchOpportunity(
+                    eq("m1"),
+                    eq(AlertType.SUREBET),
+                    // Mensagem deve conter as casas e os percentuais
+                    argThat(desc ->
+                            desc.contains("Casa:") &&
+                            desc.contains("Empate:") &&
+                            desc.contains("Fora:") &&
+                            desc.contains("%")
+                    ),
+                    anyDouble()
+            );
         }
 
         @Test
@@ -140,7 +159,8 @@ class MarketAnalyzerServiceTest {
 
             service.detectSurebet("m1");
 
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), eq("Arbitragem detectada cobrindo 1X2"), anyDouble());
+            verify(alertDispatcherService, never())
+                    .dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), anyString(), anyDouble());
         }
 
         @Test
@@ -153,8 +173,8 @@ class MarketAnalyzerServiceTest {
 
             service.detectSurebet("m1");
 
-            verify(alertDispatcherService, never()).dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), eq("Arbitragem detectada cobrindo 1X2"), anyDouble());
+            verify(alertDispatcherService, never())
+                    .dispatchOpportunity(eq("m1"), eq(AlertType.SUREBET), anyString(), anyDouble());
         }
     }
 }
-

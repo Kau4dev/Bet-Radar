@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.ToDoubleFunction;
 
@@ -66,24 +67,29 @@ public class MarketAnalyzerService {
         double discrepancy = (currentOdd / averageMarketOdd) - 1;
 
         if (discrepancy >= threshold) {
+            String description = String.format(
+                    "Apostar %s na %s | Odd: %.2f | Media mercado: %.2f",
+                    outcome, bookmakerName, currentOdd, averageMarketOdd
+            );
+
             alertDispatcherService.dispatchOpportunity(
                     matchId,
                     AlertType.EV_PLUS,
-                    "Odd " + outcome + " acima da media do mercado",
+                    description,
                     discrepancy * 100
             );
+
             log.info("EV+ detectado [{}] {}: oddAtual={}, media={}, discrepancia={}%%",
-                    outcome,
-                    matchId,
-                    currentOdd,
-                    averageMarketOdd,
+                    outcome, matchId, currentOdd, averageMarketOdd,
                     String.format("%.2f", discrepancy * 100));
         }
     }
 
     /**
      * Detecta Arbitragem (Surebet): Lucro garantido cobrindo todos os resultados.
-     * Fórmula: (1/OddCasa + 1/OddEmpate + 1/OddFora) < 1.0
+     * Formula: (1/OddCasa + 1/OddEmpate + 1/OddFora) < 1.0
+     * Inclui na mensagem: qual casa tem a melhor odd para cada resultado
+     * e qual percentual do bankroll alocar em cada aposta.
      */
     public void detectSurebet(String matchId) {
         List<OddHistory> latestOdds = oddHistoryRepository.findLatestOddsForEachBookmaker(matchId);
@@ -93,23 +99,55 @@ public class MarketAnalyzerService {
             return;
         }
 
-        double bestHome = latestOdds.stream().mapToDouble(OddHistory::homeWinOdd).max().orElse(0.0);
-        double bestDraw = latestOdds.stream().mapToDouble(OddHistory::drawOdd).max().orElse(0.0);
-        double bestAway = latestOdds.stream().mapToDouble(OddHistory::awayWinOdd).max().orElse(0.0);
+        // Encontra a odd mais alta por resultado E qual bookmaker a oferece
+        OddHistory bestHomeEntry = latestOdds.stream()
+                .filter(o -> o.homeWinOdd() != null && o.homeWinOdd() > 0)
+                .max(Comparator.comparingDouble(OddHistory::homeWinOdd))
+                .orElse(null);
 
-        if (bestHome == 0 || bestDraw == 0 || bestAway == 0) return;
+        OddHistory bestDrawEntry = latestOdds.stream()
+                .filter(o -> o.drawOdd() != null && o.drawOdd() > 0)
+                .max(Comparator.comparingDouble(OddHistory::drawOdd))
+                .orElse(null);
 
-        double arbitrageIndex = (1 / bestHome) + (1 / bestDraw) + (1 / bestAway);
+        OddHistory bestAwayEntry = latestOdds.stream()
+                .filter(o -> o.awayWinOdd() != null && o.awayWinOdd() > 0)
+                .max(Comparator.comparingDouble(OddHistory::awayWinOdd))
+                .orElse(null);
+
+        if (bestHomeEntry == null || bestDrawEntry == null || bestAwayEntry == null) return;
+
+        double bestHome = bestHomeEntry.homeWinOdd();
+        double bestDraw = bestDrawEntry.drawOdd();
+        double bestAway = bestAwayEntry.awayWinOdd();
+
+        double arbitrageIndex = (1.0 / bestHome) + (1.0 / bestDraw) + (1.0 / bestAway);
 
         if (arbitrageIndex < 1.0) {
-            double profitMargin = (1 - arbitrageIndex) * 100;
+            double profitMargin = (1.0 - arbitrageIndex) * 100;
+
+            // Percentual do bankroll a alocar em cada resultado
+            double stakeHome = (1.0 / bestHome) / arbitrageIndex * 100;
+            double stakeDraw = (1.0 / bestDraw) / arbitrageIndex * 100;
+            double stakeAway = (1.0 / bestAway) / arbitrageIndex * 100;
+
+            String homeBookmaker = bestHomeEntry.bookmaker() != null ? bestHomeEntry.bookmaker().name() : "?";
+            String drawBookmaker = bestDrawEntry.bookmaker() != null ? bestDrawEntry.bookmaker().name() : "?";
+            String awayBookmaker = bestAwayEntry.bookmaker() != null ? bestAwayEntry.bookmaker().name() : "?";
+
+            String description = String.format(
+                    "Casa: %.1f%% em %s (%.2f) | Empate: %.1f%% em %s (%.2f) | Fora: %.1f%% em %s (%.2f)",
+                    stakeHome, homeBookmaker, bestHome,
+                    stakeDraw, drawBookmaker, bestDraw,
+                    stakeAway, awayBookmaker, bestAway
+            );
+
             alertDispatcherService.dispatchOpportunity(
                     matchId,
                     AlertType.SUREBET,
-                    "Arbitragem detectada cobrindo 1X2",
+                    description,
                     profitMargin
             );
         }
-
     }
 }
