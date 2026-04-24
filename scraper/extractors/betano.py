@@ -22,6 +22,7 @@ Anti-bot:
 
 import asyncio
 import logging
+import os
 import random
 
 from playwright.async_api import async_playwright, Response, TimeoutError as PWTimeout
@@ -43,7 +44,7 @@ class BetanoExtractor(BaseExtractor):
 
     BOOKMAKER_NAME = "Betano"
     BASE_URL = "https://br.betano.com"
-    SOCCER_URL = "https://br.betano.com/sport/futebol/"
+    SOCCER_URL = "https://br.betano.com"
 
     # Padrões de URL da API interna da Betano (identificados via DevTools > Network)
     API_PATTERNS = [
@@ -79,8 +80,9 @@ class BetanoExtractor(BaseExtractor):
 
         try:
             async with async_playwright() as pw:
+                is_headless = os.getenv("SHOW_BROWSER") != "1"
                 browser = await pw.chromium.launch(
-                    headless=True,
+                    headless=is_headless,
                     args=[
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
@@ -125,7 +127,44 @@ class BetanoExtractor(BaseExtractor):
                     timeout=30_000,
                 )
 
-                # Aguarda carregamento adicional (lazy loading de eventos)
+                # --- Bloco de fechamento de overlays ---
+                # Ordem: idade → cookies → cadastro
+                # Usa seletores data-qa/id (estáveis) em vez de texto
+
+                # 1. Popup de confirmação de idade (+18)
+                # HTML: <button data-qa="age-verification-modal-ok-button"><span>Sim</span></button>
+                try:
+                    btn_age = page.locator("[data-qa='age-verification-modal-ok-button']")
+                    if await btn_age.is_visible(timeout=4_000):
+                        await btn_age.click()
+                        logger.debug("[Betano] ✅ Popup de idade (+18) fechado.")
+                        await page.wait_for_timeout(800)
+                except Exception:
+                    logger.debug("[Betano] Popup de idade não encontrado (pode já ter cookie).")
+
+                # 2. Banner de cookies do OneTrust
+                # HTML: <button id="onetrust-accept-btn-handler">SIM, EU ACEITO</button>
+                try:
+                    btn_cookies = page.locator("#onetrust-accept-btn-handler")
+                    if await btn_cookies.is_visible(timeout=3_000):
+                        await btn_cookies.click()
+                        logger.debug("[Betano] ✅ Banner de cookies aceito.")
+                        await page.wait_for_timeout(600)
+                except Exception:
+                    logger.debug("[Betano] Banner de cookies não encontrado.")
+
+                # 3. Modal de cadastro/login (botão X de fechar)
+                # HTML: <button data-testid="landing-modal-close-button" aria-label="Close modal">
+                try:
+                    btn_modal = page.locator("[data-testid='landing-modal-close-button']")
+                    if await btn_modal.is_visible(timeout=3_000):
+                        await btn_modal.click()
+                        logger.debug("[Betano] ✅ Modal de cadastro fechado.")
+                        await page.wait_for_timeout(600)
+                except Exception:
+                    logger.debug("[Betano] Modal de cadastro não encontrado.")
+
+                # Aguarda carregamento adicional (lazy loading de eventos e API calls)
                 await page.wait_for_timeout(random.randint(2_500, 4_000))
 
                 # Se nada foi coletado via API, tenta fallback por DOM
@@ -262,34 +301,37 @@ class BetanoExtractor(BaseExtractor):
     async def _fallback_dom(self, page, query_home: str, query_away: str) -> list[dict]:
         """
         Fallback: tenta extrair odds diretamente do DOM quando a intercepção de API falha.
-
-        ⚠️ FRÁGIL: seletores CSS mudam com frequência. Verificar periodicamente.
+        Utiliza os seletores data-qa estáveis da Betano.
         """
         results = []
         try:
-            # Aguarda ao menos um evento aparecer no DOM
-            await page.wait_for_selector(self.SEL_EVENT_NAME, timeout=5_000)
-            event_elements = await page.locator(self.SEL_EVENT_NAME).all()
+            sel_card = "[data-qa='event-card']"
+            
+            # Aguarda ao menos um card de evento aparecer no DOM
+            await page.wait_for_selector(sel_card, timeout=5_000)
+            cards = await page.locator(sel_card).all()
 
-            for el in event_elements:
-                text = await el.inner_text()
-                lines = [l.strip() for l in text.split("\n") if l.strip()]
-                if len(lines) < 2:
-                    continue
-
-                home = lines[0]
-                away = lines[1]
-                if not match_is_target(home, away, query_home, query_away):
-                    continue
-
-                # Tenta pegar as 3 odds (1, X, 2) do elemento pai
+            for card in cards:
                 try:
-                    parent = el.locator("xpath=ancestor::*[contains(@class,'game')]").first
-                    odd_els = await parent.locator(self.SEL_ODD_VALUE).all()
-                    if len(odd_els) >= 3:
-                        home_win = float((await odd_els[0].inner_text()).strip())
-                        draw = float((await odd_els[1].inner_text()).strip())
-                        away_win = float((await odd_els[2].inner_text()).strip())
+                    # Extrai os nomes dos times
+                    participants = await card.locator("[data-qa='participants'] .tw-truncate").all_inner_texts()
+                    if len(participants) < 2:
+                        continue
+                    
+                    home = participants[0].strip()
+                    away = participants[1].strip()
+                    
+                    if not match_is_target(home, away, query_home, query_away):
+                        continue
+
+                    # Tenta extrair as 3 odds (1, X, 2)
+                    selections = await card.locator("[data-qa='event-selection'] span[class*='highlight']").all_inner_texts()
+                    
+                    if len(selections) >= 3:
+                        home_win = float(selections[0].strip() or 0)
+                        draw = float(selections[1].strip() or 0)
+                        away_win = float(selections[2].strip() or 0)
+                        
                         odd = self.build_odd_payload(
                             bookmaker=self.BOOKMAKER_NAME,
                             match_id=build_match_id(home, away),
@@ -301,10 +343,10 @@ class BetanoExtractor(BaseExtractor):
                         )
                         results.append(odd)
                 except Exception as exc:
-                    logger.debug(f"[Betano][DOM] Erro ao extrair odds do DOM: {exc}")
+                    logger.debug(f"[Betano][DOM] Erro ao extrair odds de um card: {exc}")
 
         except PWTimeout:
-            logger.debug("[Betano][DOM] Timeout aguardando elementos DOM.")
+            logger.debug("[Betano][DOM] Timeout aguardando elementos DOM (event-card).")
         except Exception as exc:
             logger.debug(f"[Betano][DOM] Erro no fallback DOM: {exc}")
 
