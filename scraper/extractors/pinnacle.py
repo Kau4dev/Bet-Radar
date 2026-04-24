@@ -1,19 +1,30 @@
 """
 extractors/pinnacle.py
 -----------------------
-Extractor para Pinnacle via API REST pública (sem necessidade de Playwright).
+Extractor que usa The Odds API (https://the-odds-api.com) como fonte de dados.
 
-A Pinnacle expõe uma API JSON acessível com uma X-API-Key pública conhecida.
-Esta é a implementação mais rápida e confiável — prioridade 1 de implementação.
+Motivação para migrar da API direta da Pinnacle:
+    - A Pinnacle fechou o acesso público à sua API em julho/2025.
+    - A URL interna (arcadia / pinnacle.bet.br) retorna HTTP 500.
+    - The Odds API é a alternativa oficial recomendada pelo CONTEXT.md do projeto.
+    - Plano gratuito: 500 requests/mês (~16/dia) — suficiente para desenvolvimento.
+    - Retorna odds de MÚLTIPLOS bookmakers (Bet365, Betano, Pinnacle, etc.) numa
+      única chamada, reduzindo o número de requests necessários.
+
+Configuração:
+    - Defina ODDS_API_KEY no arquivo .env (obtenha grátis em https://the-odds-api.com)
+    - A chave é lida via variável de ambiente para não ser commitada no código.
 
 Fluxo:
-    1. Busca todas as ligas de futebol (/sports/29/leagues)
-    2. Para cada liga (top 50 por popularidade), busca os matchups
-    3. Compara os nomes dos times com a query usando fuzzy match
-    4. Se encontrar, extrai as odds 1X2 e retorna no schema RawOddDTO
+    1. Busca todos os esportes disponíveis para descobrir quais ligas de futebol existem
+    2. Para cada liga, busca as odds com market h2h (1X2)
+    3. Filtra os eventos pelo nome da partida (fuzzy match)
+    4. Retorna odds no schema RawOddDTO para CADA bookmaker encontrado no evento
+       (assim um único evento pode publicar múltiplas odds no Kafka)
 """
 
 import logging
+import os
 
 import httpx
 
@@ -27,189 +38,281 @@ logger = logging.getLogger(__name__)
 
 class PinnacleExtractor(BaseExtractor):
     """
-    Extractor de odds da Pinnacle usando a API REST arcadia (não oficial, mas pública).
+    Extractor baseado em The Odds API.
 
-    A API não requer autenticação real — a X-API-Key é pública e amplamente conhecida.
-    Retorna JSON estruturado, sem necessidade de parsear HTML ou executar JavaScript.
+    Apesar do nome histórico 'PinnacleExtractor', esta classe agora usa
+    The Odds API como fonte, que inclui odds da Pinnacle entre outros bookmakers.
+
+    Chave de API:
+        Obtenha gratuitamente em https://the-odds-api.com
+        Configure no .env: ODDS_API_KEY=sua_chave_aqui
     """
 
     BOOKMAKER_NAME = "Pinnacle"
 
-    # Base URL da API arcadia (usada pelo frontend da Pinnacle)
-    BASE_URL = "https://pinnacle.bet.br/sportsbook"
+    BASE_URL = "https://api.the-odds-api.com/v4"
 
-    # ID do esporte futebol na API da Pinnacle
-    SOCCER_SPORT_ID = 29
+    # Ligas de futebol mais relevantes para o mercado BR + Europa.
+    # Lista completa em: GET /v4/sports/?apiKey=KEY
+    # Usar lista fixa evita gastar requests da cota apenas para listar ligas.
+    SOCCER_SPORT_KEYS = [
+        "soccer_brazil_campeonato",          # Brasileirão Série A
+        "soccer_brazil_serie_b",             # Brasileirão Série B
+        "soccer_south_america_cup",          # Copa Libertadores / Sul-Americana
+        "soccer_uefa_champs_league",         # Champions League
+        "soccer_uefa_europa_league",         # Europa League
+        "soccer_epl",                        # Premier League
+        "soccer_spain_la_liga",              # La Liga
+        "soccer_italy_serie_a",              # Serie A italiana
+        "soccer_germany_bundesliga",         # Bundesliga
+        "soccer_france_ligue_one",           # Ligue 1
+        "soccer_conmebol_copa_libertadores", # Copa Libertadores
+    ]
 
-    # Headers necessários para simular o browser client
-    HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "X-API-Key": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R",
-        "Referer": "https://www.pinnacle.com/",
-        "Accept": "application/json",
-        "Accept-Language": "pt-BR,pt;q=0.9",
-    }
+    # Bookmakers a solicitar (os mais relevantes para o mercado BR)
+    # Lista completa: GET /v4/sports/{sport}/odds/?apiKey=KEY&regions=eu,uk
+    BOOKMAKERS = "pinnacle,bet365,betano,betfair"
 
-    # Número máximo de ligas a verificar (ligas são ordenadas por popularidade)
-    MAX_LEAGUES_TO_CHECK = 50
+    # Regiões onde os bookmakers estão disponíveis
+    REGIONS = "eu,uk,us,au"
 
     async def extract(self, match_query: str) -> list[dict]:
         """
-        Busca odds para a partida informada na Pinnacle.
+        Busca odds para a partida informada via The Odds API.
+
+        Retorna uma odd por bookmaker encontrado para a partida.
+        Ex: se Pinnacle, Bet365 e Betano tiverem odds, retorna 3 dicts.
 
         Args:
             match_query: Ex: "Real Madrid x Barcelona"
 
         Returns:
-            Lista com 0 ou 1 dict no schema RawOddDTO.
+            Lista de dicts no schema RawOddDTO (uma entrada por bookmaker).
         """
+        api_key = os.getenv("ODDS_API_KEY", "").strip()
+        if not api_key:
+            logger.error(
+                "[OddsAPI] ODDS_API_KEY não configurada. "
+                "Obtenha uma chave gratuita em https://the-odds-api.com e adicione ao .env"
+            )
+            return []
+
         try:
             query_home, query_away = parse_match_query(match_query)
         except ValueError as exc:
-            logger.warning(f"[Pinnacle] Query inválida: {exc}")
+            logger.warning(f"[OddsAPI] Query inválida: {exc}")
             return []
 
-        logger.info(f"[Pinnacle] Buscando: {query_home} x {query_away}")
+        logger.info(f"[OddsAPI] Buscando: {query_home} x {query_away}")
+
+        all_odds: list[dict] = []
 
         try:
             async with httpx.AsyncClient(
-                headers=self.HEADERS,
-                timeout=httpx.Timeout(15.0, connect=10.0),
+                timeout=httpx.Timeout(20.0, connect=10.0),
                 follow_redirects=True,
             ) as client:
-                leagues = await self._fetch_leagues(client)
-                if not leagues:
-                    logger.warning("[Pinnacle] Nenhuma liga retornada pela API.")
-                    return []
-
-                # Itera pelas ligas mais populares
-                for league in leagues[: self.MAX_LEAGUES_TO_CHECK]:
-                    league_id = league.get("id")
-                    if not league_id:
+                for sport_key in self.SOCCER_SPORT_KEYS:
+                    events = await self._fetch_odds(client, api_key, sport_key)
+                    if events is None:
+                        # None = erro fatal (ex: chave inválida) — para de tentar
+                        break
+                    if not events:
                         continue
 
-                    odd = await self._find_match_in_league(
-                        client, league_id, query_home, query_away
-                    )
-                    if odd:
+                    found = self._search_match(events, query_home, query_away)
+                    if found:
                         logger.info(
-                            f"[Pinnacle] ✅ Partida encontrada na liga '{league.get('name', league_id)}'"
+                            f"[OddsAPI] ✅ Partida encontrada em '{sport_key}' "
+                            f"({len(found)} bookmaker(s))"
                         )
-                        return [odd]
+                        all_odds.extend(found)
+                        break  # Encontrou — não precisa verificar outras ligas
 
         except httpx.HTTPError as exc:
-            logger.error(f"[Pinnacle] Erro HTTP: {exc}")
+            logger.error(f"[OddsAPI] Erro HTTP: {exc}")
         except Exception as exc:
-            logger.error(f"[Pinnacle] Erro inesperado: {exc}")
+            logger.error(f"[OddsAPI] Erro inesperado: {exc}")
 
-        logger.info(f"[Pinnacle] Partida não encontrada: {match_query}")
-        return []
+        if not all_odds:
+            logger.info(f"[OddsAPI] Partida não encontrada: {match_query}")
 
-    @async_retry(max_attempts=3, base_delay=1.0, exceptions=(httpx.HTTPError,))
-    async def _fetch_leagues(self, client: httpx.AsyncClient) -> list[dict]:
-        """
-        Busca todas as ligas de futebol ordenadas por popularidade.
+        return all_odds
 
-        Endpoint: GET /sports/{sport_id}/leagues?brandId=0
-        """
-        resp = await client.get(
-            f"{self.BASE_URL}/sports/{self.SOCCER_SPORT_ID}/leagues",
-            params={"brandId": "0", "jurisdiction": "0"},
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    @async_retry(max_attempts=2, base_delay=0.5, exceptions=(httpx.HTTPError,))
-    async def _find_match_in_league(
+    @async_retry(max_attempts=3, base_delay=2.0, exceptions=(httpx.TransportError, httpx.TimeoutException))
+    async def _fetch_odds(
         self,
         client: httpx.AsyncClient,
-        league_id: int,
+        api_key: str,
+        sport_key: str,
+    ) -> list[dict] | None:
+        """
+        Busca eventos com odds h2h (1X2) para um esporte/liga específico.
+
+        Endpoint: GET /v4/sports/{sport_key}/odds/
+        Parâmetros:
+            apiKey:      chave de acesso
+            regions:     regiões dos bookmakers (eu, uk, us, au)
+            markets:     h2h = moneyline / 1X2
+            oddsFormat:  decimal (padrão europeu — compatível com o backend)
+
+        Returns:
+            Lista de eventos com odds, ou None em erro fatal (chave inválida, etc.)
+        """
+        url = f"{self.BASE_URL}/sports/{sport_key}/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": self.REGIONS,
+            "markets": "h2h",
+            "oddsFormat": "decimal",
+            "bookmakers": self.BOOKMAKERS,
+        }
+
+        try:
+            resp = await client.get(url, params=params)
+
+            # Log do consumo de cota (The Odds API informa nos headers)
+            remaining = resp.headers.get("x-requests-remaining", "?")
+            used = resp.headers.get("x-requests-used", "?")
+            logger.debug(f"[OddsAPI] Cota: {used} usadas / {remaining} restantes")
+
+            if resp.status_code == 401:
+                logger.error("[OddsAPI] ❌ Chave de API inválida (HTTP 401). Verifique ODDS_API_KEY no .env")
+                return None  # Erro fatal — para o loop de ligas
+
+            if resp.status_code == 422:
+                # Liga não disponível ou sem eventos — normal, não é erro
+                logger.debug(f"[OddsAPI] Liga '{sport_key}' sem eventos disponíveis.")
+                return []
+
+            if resp.status_code == 429:
+                logger.warning("[OddsAPI] Rate limit atingido (HTTP 429). Aguardando...")
+                return []
+
+            resp.raise_for_status()
+            return resp.json()
+
+        except httpx.HTTPStatusError as exc:
+            logger.debug(f"[OddsAPI] HTTP {exc.response.status_code} para '{sport_key}'")
+            return []
+
+    def _search_match(
+        self,
+        events: list[dict],
         query_home: str,
         query_away: str,
+    ) -> list[dict]:
+        """
+        Busca a partida alvo nos eventos retornados pela The Odds API e
+        extrai as odds de cada bookmaker encontrado.
+
+        Estrutura de um evento retornado pela API:
+        {
+            "id": "abc123",
+            "sport_key": "soccer_epl",
+            "home_team": "Arsenal",
+            "away_team": "Chelsea",
+            "commence_time": "2026-04-24T15:00:00Z",
+            "bookmakers": [
+                {
+                    "key": "bet365",
+                    "title": "Bet365",
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": "Arsenal",  "price": 2.10},
+                                {"name": "Chelsea",  "price": 3.40},
+                                {"name": "Draw",     "price": 3.20}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        """
+        results = []
+
+        for event in events:
+            home = event.get("home_team", "")
+            away = event.get("away_team", "")
+
+            if not match_is_target(home, away, query_home, query_away):
+                continue
+
+            # Encontrou a partida — extrai odds de cada bookmaker
+            bookmakers = event.get("bookmakers", [])
+            for bk in bookmakers:
+                bk_name = bk.get("title", bk.get("key", "Unknown"))
+                markets = bk.get("markets", [])
+
+                h2h_market = next(
+                    (m for m in markets if m.get("key") == "h2h"), None
+                )
+                if not h2h_market:
+                    continue
+
+                odd = self._parse_h2h_market(h2h_market, bk_name, home, away)
+                if odd:
+                    results.append(odd)
+
+        return results
+
+    def _parse_h2h_market(
+        self,
+        market: dict,
+        bookmaker_name: str,
+        home: str,
+        away: str,
     ) -> dict | None:
         """
-        Busca matchups de uma liga específica e verifica se a partida alvo está presente.
+        Extrai as odds 1X2 de um mercado h2h retornado pela The Odds API.
 
-        Endpoint: GET /leagues/{league_id}/matchups
-        Retorna list de matchups com participants e prices.
+        Os outcomes do h2h têm:
+            - {"name": "Home Team Name", "price": 2.10}  → vitória mandante
+            - {"name": "Away Team Name", "price": 3.40}  → vitória visitante
+            - {"name": "Draw",           "price": 3.20}  → empate
+
+        O outcome de empate tem name="Draw" independentemente do idioma.
+        Os outcomes de vitória têm o nome do time — identificamos por exclusão.
         """
-        try:
-            resp = await client.get(f"{self.BASE_URL}/leagues/{league_id}/matchups")
-            if resp.status_code != 200:
-                return None
-
-            matchups = resp.json()
-            if not isinstance(matchups, list):
-                return None
-
-            for matchup in matchups:
-                # Apenas eventos ao vivo ou futuros (type: "matchup", não "special")
-                if matchup.get("type") != "matchup":
-                    continue
-
-                participants = matchup.get("participants", [])
-                if len(participants) < 2:
-                    continue
-
-                # Pinnacle: participante[0] = home, participante[1] = away
-                home_name = participants[0].get("name", "")
-                away_name = participants[1].get("name", "")
-
-                if not match_is_target(home_name, away_name, query_home, query_away):
-                    continue
-
-                # Encontrou a partida — extrai as odds 1X2
-                return self._parse_odds(matchup, home_name, away_name)
-
-        except Exception as exc:
-            logger.debug(f"[Pinnacle] Erro ao processar liga {league_id}: {exc}")
-            return None
-
-        return None
-
-    def _parse_odds(self, matchup: dict, home_name: str, away_name: str) -> dict | None:
-        """
-        Extrai as odds 1X2 do matchup retornado pela API da Pinnacle.
-
-        Estrutura esperada em matchup["prices"]:
-            [{"designation": "home", "price": 2.40}, ...]
-        """
-        prices = matchup.get("prices", [])
-        if not prices:
-            logger.debug(f"[Pinnacle] Matchup sem prices: {matchup.get('id')}")
+        outcomes = market.get("outcomes", [])
+        if len(outcomes) < 3:
             return None
 
         try:
-            home_price = next(
-                p["price"] for p in prices if p.get("designation") == "home"
+            # Empate: name == "Draw" (padrão da The Odds API)
+            draw_outcome = next(o for o in outcomes if o.get("name") == "Draw")
+            draw_price = float(draw_outcome["price"])
+
+            # Os outros 2 são os times — identificar home/away pelo nome
+            team_outcomes = [o for o in outcomes if o.get("name") != "Draw"]
+            if len(team_outcomes) != 2:
+                return None
+
+            # Identifica qual outcome é o mandante
+            home_outcome = next(
+                (o for o in team_outcomes if match_is_target(o["name"], home, home, home)),
+                team_outcomes[0]  # fallback: primeiro é home
             )
-            draw_price = next(
-                p["price"] for p in prices if p.get("designation") == "draw"
+            away_outcome = next(
+                (o for o in team_outcomes if o is not home_outcome),
+                team_outcomes[1]
             )
-            away_price = next(
-                p["price"] for p in prices if p.get("designation") == "away"
-            )
+
+            home_price = float(home_outcome["price"])
+            away_price = float(away_outcome["price"])
 
             return self.build_odd_payload(
-                bookmaker=self.BOOKMAKER_NAME,
-                match_id=build_match_id(home_name, away_name),
-                team_home=home_name,
-                team_away=away_name,
-                home_win=float(home_price),
-                draw=float(draw_price),
-                away_win=float(away_price),
+                bookmaker=bookmaker_name,
+                match_id=build_match_id(home, away),
+                team_home=home,
+                team_away=away,
+                home_win=home_price,
+                draw=draw_price,
+                away_win=away_price,
             )
 
-        except StopIteration:
-            logger.debug(
-                f"[Pinnacle] Odds 1X2 incompletas para: {home_name} x {away_name}. "
-                "Pode ser mercado sem empate (ex: eliminatória)."
-            )
-            return None
-        except (KeyError, ValueError) as exc:
-            logger.warning(f"[Pinnacle] Erro ao parsear prices: {exc}")
+        except (StopIteration, KeyError, ValueError, TypeError) as exc:
+            logger.debug(f"[OddsAPI] Erro ao parsear market h2h ({bookmaker_name}): {exc}")
             return None
