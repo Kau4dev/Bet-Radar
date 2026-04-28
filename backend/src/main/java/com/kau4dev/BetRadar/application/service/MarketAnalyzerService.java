@@ -67,9 +67,19 @@ public class MarketAnalyzerService {
         double discrepancy = (currentOdd / averageMarketOdd) - 1;
 
         if (discrepancy >= threshold) {
+            String translatedOutcome = switch (outcome.toUpperCase()) {
+                case "HOME" -> "Casa (1)";
+                case "DRAW" -> "Empate (X)";
+                case "AWAY" -> "Fora (2)";
+                default -> outcome;
+            };
+
             String description = String.format(
-                    "Apostar %s na %s | Odd: %.2f | Media mercado: %.2f",
-                    outcome, bookmakerName, currentOdd, averageMarketOdd
+                    "🎯 Aposta Recomendada: %s\n" +
+                    "🏦 Casa de Aposta: %s\n" +
+                    "📈 Odd Encontrada: %.2f\n" +
+                    "📊 Média do Mercado: %.2f",
+                    translatedOutcome, bookmakerName, currentOdd, averageMarketOdd
             );
 
             alertDispatcherService.dispatchOpportunity(
@@ -136,7 +146,9 @@ public class MarketAnalyzerService {
             String awayBookmaker = bestAwayEntry.bookmaker() != null ? bestAwayEntry.bookmaker().name() : "?";
 
             String description = String.format(
-                    "Casa: %.1f%% em %s (%.2f) | Empate: %.1f%% em %s (%.2f) | Fora: %.1f%% em %s (%.2f)",
+                    "🏠 Casa (1): Alocar %.1f%% na %s (Odd: %.2f)\n" +
+                    "🤝 Empate (X): Alocar %.1f%% na %s (Odd: %.2f)\n" +
+                    "✈️ Fora (2): Alocar %.1f%% na %s (Odd: %.2f)",
                     stakeHome, homeBookmaker, bestHome,
                     stakeDraw, drawBookmaker, bestDraw,
                     stakeAway, awayBookmaker, bestAway
