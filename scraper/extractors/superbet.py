@@ -17,6 +17,7 @@ API interna identificada via DevTools > Network:
 """
 
 import logging
+import os
 import random
 
 from playwright.async_api import async_playwright, Response, TimeoutError as PWTimeout
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 class SuperbetExtractor(BaseExtractor):
     BOOKMAKER_NAME = "Superbet"
-    SOCCER_URL = "https://superbet.com/pt-br/apostas-esportivas/futebol"
+    SOCCER_URL = "https://superbet.bet.br/apostas/futebol/hoje"
 
     # Padrões da API/GraphQL da Superbet
     API_PATTERNS = [
@@ -57,8 +58,9 @@ class SuperbetExtractor(BaseExtractor):
 
         try:
             async with async_playwright() as pw:
+                is_headless = os.getenv("SHOW_BROWSER") != "1"
                 browser = await pw.chromium.launch(
-                    headless=True,
+                    headless=is_headless,
                     args=["--no-sandbox", "--disable-dev-shm-usage",
                           "--disable-blink-features=AutomationControlled"],
                 )
@@ -88,11 +90,26 @@ class SuperbetExtractor(BaseExtractor):
                         logger.debug(f"[Superbet] Erro ao parsear resposta: {e}")
 
                 page.on("response", handle_response)
-                await page.goto(self.SOCCER_URL, wait_until="networkidle", timeout=35_000)
+                await page.goto(self.SOCCER_URL, wait_until="domcontentloaded", timeout=45_000)
+                
+                # --- Bloco de Popups Superbet ---
+                try:
+                    btn_cookies = page.locator("#onetrust-accept-btn-handler").first
+                    if await btn_cookies.is_visible(timeout=5_000):
+                        await btn_cookies.click()
+                        logger.debug("[Superbet] ✅ Banner de cookies aceito.")
+                        await page.wait_for_timeout(1_000)
+                except Exception as exc:
+                    logger.debug(f"[Superbet] Falha ao lidar com popup de cookies: {exc}")
+
                 await page.wait_for_timeout(random.randint(3_000, 5_000))
 
                 if not collected:
                     collected.extend(await self._fallback_dom(page, query_home, query_away))
+
+                if not collected and not is_headless:
+                    logger.debug("[Superbet] ⚠️ Nenhuma odd coletada. Mantendo o navegador aberto por 15s para debug visual.")
+                    await page.wait_for_timeout(15_000)
 
                 await browser.close()
 
@@ -210,23 +227,34 @@ class SuperbetExtractor(BaseExtractor):
         return None
 
     async def _fallback_dom(self, page, query_home: str, query_away: str) -> list[dict]:
-        """Fallback DOM — muito frágil na Superbet por usar CSS Modules com hash."""
+        """Extração pelo DOM da Superbet baseada em seletores e2e robustos."""
         results = []
         try:
-            await page.wait_for_selector(self.SEL_EVENT, timeout=5_000)
-            for row in await page.locator(self.SEL_EVENT).all():
-                lines = [l.strip() for l in (await row.inner_text()).split("\n") if l.strip()]
-                if len(lines) < 2:
-                    continue
-                home, away = lines[0], lines[1]
-                if not match_is_target(home, away, query_home, query_away):
-                    continue
+            sel_card = ".e2e-event-row"
+            await page.wait_for_selector(sel_card, timeout=5_000)
+            cards = await page.locator(sel_card).all()
+            
+            for card in cards:
                 try:
-                    odds_els = await row.locator(self.SEL_ODDS).all()
+                    home_texts = await card.locator(".e2e-event-team1-name").all_inner_texts()
+                    away_texts = await card.locator(".e2e-event-team2-name").all_inner_texts()
+                    
+                    if not home_texts or not away_texts:
+                        continue
+                        
+                    home = home_texts[0].strip()
+                    away = away_texts[0].strip()
+                    
+                    if not match_is_target(home, away, query_home, query_away):
+                        continue
+                        
+                    odds_els = await card.locator(".e2e-odd-value").all_inner_texts()
+                    
                     if len(odds_els) >= 3:
-                        hw = float((await odds_els[0].inner_text()).strip())
-                        dr = float((await odds_els[1].inner_text()).strip())
-                        aw = float((await odds_els[2].inner_text()).strip())
+                        hw = float(odds_els[0].replace(',', '.').strip())
+                        dr = float(odds_els[1].replace(',', '.').strip())
+                        aw = float(odds_els[2].replace(',', '.').strip())
+                        
                         results.append(self.build_odd_payload(
                             bookmaker=self.BOOKMAKER_NAME,
                             match_id=build_match_id(home, away),
@@ -235,7 +263,10 @@ class SuperbetExtractor(BaseExtractor):
                         ))
                         break
                 except Exception as e:
-                    logger.debug(f"[Superbet][DOM] {e}")
+                    logger.debug(f"[Superbet][DOM] Erro no card: {e}")
+        except PWTimeout:
+            logger.debug("[Superbet][DOM] Timeout esperando elementos da partida.")
         except Exception as e:
             logger.debug(f"[Superbet][DOM] Falha: {e}")
+            
         return results

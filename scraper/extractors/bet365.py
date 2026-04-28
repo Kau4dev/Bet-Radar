@@ -87,8 +87,9 @@ class Bet365Extractor(BaseExtractor):
 
         try:
             async with async_playwright() as pw:
+                is_headless = os.getenv("SHOW_BROWSER") != "1"
                 launch_args = {
-                    "headless": True,
+                    "headless": is_headless,
                     "args": [
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
@@ -119,17 +120,21 @@ class Bet365Extractor(BaseExtractor):
                     },
                 }
                 ctx = await browser.new_context(**ctx_args)
-
-                # Injeta scripts de stealth para mascarar automação
-                # playwright-stealth modifica navigator.webdriver, plugins, etc.
-                await ctx.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-                    Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt']});
-                    window.chrome = {runtime: {}};
-                """)
-
                 page = await ctx.new_page()
+
+                # Usa a biblioteca dedicada playwright-stealth para mascarar a automação
+                # de forma muito mais profunda (WebGL, Canvas, navigator.webdriver, etc.)
+                try:
+                    from playwright_stealth import stealth_async
+                    await stealth_async(page)
+                    logger.debug("[Bet365] playwright-stealth aplicado com sucesso.")
+                except ImportError:
+                    logger.warning("[Bet365] playwright-stealth não instalado. Usando fallback stealth fraco.")
+                    # Fallback fraco caso a lib não esteja instalada
+                    await ctx.add_init_script("""
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        window.chrome = {runtime: {}};
+                    """)
 
                 # Intercept API responses
                 async def handle_response(response: Response) -> None:
@@ -151,13 +156,17 @@ class Bet365Extractor(BaseExtractor):
 
                 # Navega para a seção de futebol
                 try:
+                    # 'commit' faz com que não fique preso na tela de loading do Cloudflare/Bet365
                     await page.goto(
                         self.SOCCER_URL,
-                        wait_until="domcontentloaded",
-                        timeout=45_000,
+                        wait_until="commit",
+                        timeout=30_000,
                     )
-                except PWTimeout:
-                    logger.warning("[Bet365] Timeout na navegação. Prosseguindo mesmo assim.")
+                except Exception as exc:
+                    logger.warning(f"[Bet365] Erro na navegação: {exc}")
+                    if not is_headless:
+                        logger.warning("[Bet365] Pausando por 10s para debug visual da falha de rede...")
+                        await page.wait_for_timeout(10_000)
 
                 # Delay humano antes de interagir
                 await page.wait_for_timeout(random.randint(3_000, 5_500))
@@ -172,12 +181,16 @@ class Bet365Extractor(BaseExtractor):
                     dom_odds = await self._fallback_dom(page, query_home, query_away)
                     collected_odds.extend(dom_odds)
 
+                if not collected_odds and not is_headless:
+                    logger.debug("[Bet365] ⚠️ Nenhuma odd coletada. Mantendo o navegador aberto por 15s para debug visual.")
+                    await page.wait_for_timeout(15_000)
+
                 await browser.close()
 
-        except PWTimeout:
-            logger.error("[Bet365] Timeout geral ao carregar a Bet365.")
         except Exception as exc:
-            logger.error(f"[Bet365] Erro inesperado: {exc}")
+            logger.error(f"[Bet365] Erro fatal no script: {exc}")
+            # Em caso de crash duro no Playwright, não podemos dar wait_for_timeout se o browser caiu,
+            # mas o try/except mais genérico no page.goto já vai ajudar a pegar os problemas de rede.
 
         logger.info(f"[Bet365] Odds coletadas: {len(collected_odds)}")
         return collected_odds
@@ -249,76 +262,115 @@ class Bet365Extractor(BaseExtractor):
     ) -> None:
         """
         Usa a caixa de busca da Bet365 para filtrar a partida e esperar API responses.
-        ⚠️ Seletor da search box é frágil.
+        Aplica locators mais genéricos para lidar com a ofuscação das classes CSS.
         """
         try:
-            search = page.locator(self.SEL_SEARCH_BOX).first
-            if await search.count() == 0:
-                return
+            # 1. Tenta clicar no ícone de lupa (frequentemente presente no header)
+            search_icon = page.locator("[class*='Search'], [class*='search']").filter(has=page.locator("svg")).first
+            if await search_icon.is_visible(timeout=2_000):
+                await search_icon.click()
+                await page.wait_for_timeout(1_000)
 
-            await search.click()
-            await page.wait_for_timeout(random.randint(500, 1_000))
-            # Digita com velocidade humana apenas o nome do time mandante
-            await page.keyboard.type(query_home, delay=random.randint(80, 150))
-            await page.wait_for_timeout(2_500)
-
-            # As respostas de API são capturadas pelo handler de response
-            logger.debug(f"[Bet365] Busca realizada: '{query_home}'")
+            # 2. Localiza o campo de input de texto ativo
+            search_input = page.locator("input[type='text']").first
+            if await search_input.is_visible(timeout=2_000):
+                await search_input.click()
+                await page.wait_for_timeout(500)
+                
+                # Digita o nome do time da casa pausadamente
+                for char in query_home:
+                    await search_input.type(char, delay=random.randint(50, 150))
+                
+                await page.wait_for_timeout(3_000)
+                logger.debug(f"[Bet365] Busca realizada por: '{query_home}'")
+            else:
+                logger.debug("[Bet365] Caixa de busca não encontrada na tela.")
 
         except Exception as exc:
-            logger.debug(f"[Bet365] Busca falhou: {exc}")
+            logger.debug(f"[Bet365] Falha na rotina de busca: {exc}")
 
     async def _fallback_dom(self, page, query_home: str, query_away: str) -> list[dict]:
         """
         Fallback DOM para quando a API não for interceptada.
-        ⚠️ MUITO FRÁGIL — seletores mudam com cada deploy da Bet365.
-        Verificar e atualizar periodicamente via DevTools.
+        A Bet365 ofusca fortemente as classes CSS (ex: cpr-29, rgl-542d6e).
+        Usamos uma heurística via JavaScript que ignora classes e busca 
+        o menor container que possua o nome dos dois times e os valores das odds.
         """
         results = []
         try:
-            await page.wait_for_selector(self.SEL_EVENT_TEAMS, timeout=5_000)
-            rows = await page.locator(self.SEL_EVENT_TEAMS).all()
+            # Aguarda o DOM carregar minimamente
+            await page.wait_for_timeout(2_000)
 
-            for row in rows:
-                text = await row.inner_text()
-                teams = [t.strip() for t in text.split("\n") if t.strip()]
-                if len(teams) < 2:
-                    continue
+            # Injeta e executa JS para encontrar o bloco da partida
+            js_script = """
+            (args) => {
+                const home = args.home;
+                const away = args.away;
+                const containers = Array.from(document.querySelectorAll('div, section, article, li'));
+                
+                let bestLines = null;
+                let minLen = Infinity;
 
-                home, away = teams[0], teams[1]
-                if not match_is_target(home, away, query_home, query_away):
-                    continue
+                for (let c of containers) {
+                    let txt = c.innerText || "";
+                    // Verifica se o container possui o nome de ambos os times
+                    if (txt.includes(home) && txt.includes(away)) {
+                        let lines = txt.split('\\n').map(l => l.trim()).filter(l => l);
+                        // Filtra linhas que parecem ser odds (ex: 1.50, 3.60)
+                        let decimals = lines.filter(l => /^\\d+\\.\\d{2,3}$/.test(l));
+                        
+                        // O bloco de evento costuma ter no mínimo 3 odds (1, X, 2)
+                        if (decimals.length >= 3 && txt.length < minLen) {
+                            minLen = txt.length;
+                            bestLines = lines;
+                        }
+                    }
+                }
+                return bestLines;
+            }
+            """
+            
+            lines = await page.evaluate(js_script, {"home": query_home, "away": query_away})
+            
+            if not lines:
+                logger.debug(f"[Bet365][DOM] Nenhum bloco encontrado para {query_home} x {query_away}")
+                return []
 
-                # Tenta pegar as odds no elemento ancestral do evento
-                try:
-                    parent = row.locator(
-                        "xpath=ancestor::*[contains(@class,'rcl-ParticipantFixtureDetails') "
-                        "or contains(@class,'sgl-EventContainer')]"
-                    ).first
-                    odd_btns = await parent.locator(self.SEL_ODD_BUTTON).all()
+            home_win, draw, away_win = 0.0, 0.0, 0.0
+            
+            # Tenta encontrar a âncora padrão "1", "X", "2"
+            try:
+                if "1" in lines and "X" in lines and "2" in lines:
+                    home_win = float(lines[lines.index("1") + 1])
+                    draw = float(lines[lines.index("X") + 1])
+                    away_win = float(lines[lines.index("2") + 1])
+                else:
+                    raise ValueError("Marcadores 1, X, 2 não encontrados.")
+            except (ValueError, IndexError):
+                # Fallback: pega os últimos 3 números decimais (geralmente são 1, X, 2)
+                import re
+                decimals = [float(l) for l in lines if re.match(r"^\d+\.\d{2,3}$", l)]
+                if len(decimals) >= 3:
+                    home_win, draw, away_win = decimals[-3], decimals[-2], decimals[-1]
+                else:
+                    logger.debug("[Bet365][DOM] Não foi possível extrair os 3 valores numéricos.")
+                    return []
 
-                    if len(odd_btns) >= 3:
-                        home_win = float((await odd_btns[0].inner_text()).strip())
-                        draw = float((await odd_btns[1].inner_text()).strip())
-                        away_win = float((await odd_btns[2].inner_text()).strip())
-
-                        results.append(self.build_odd_payload(
-                            bookmaker=self.BOOKMAKER_NAME,
-                            match_id=build_match_id(home, away),
-                            team_home=home,
-                            team_away=away,
-                            home_win=home_win,
-                            draw=draw,
-                            away_win=away_win,
-                        ))
-                        break  # Encontrou a partida — para de iterar
-
-                except (ValueError, IndexError) as exc:
-                    logger.debug(f"[Bet365][DOM] Erro ao parsear odds: {exc}")
+            odd_payload = self.build_odd_payload(
+                bookmaker=self.BOOKMAKER_NAME,
+                match_id=build_match_id(query_home, query_away),
+                team_home=query_home,
+                team_away=query_away,
+                home_win=home_win,
+                draw=draw,
+                away_win=away_win,
+            )
+            results.append(odd_payload)
+            logger.debug("[Bet365][DOM] Odds extraídas com sucesso ignorando classes CSS.")
 
         except PWTimeout:
-            logger.debug("[Bet365][DOM] Timeout esperando elementos.")
+            logger.debug("[Bet365][DOM] Timeout aguardando renderização.")
         except Exception as exc:
-            logger.debug(f"[Bet365][DOM] Erro no fallback: {exc}")
+            logger.debug(f"[Bet365][DOM] Erro na heurística de fallback: {exc}")
 
         return results

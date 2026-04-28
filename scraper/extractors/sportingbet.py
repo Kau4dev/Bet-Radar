@@ -11,6 +11,7 @@ URL alvo: https://sports.sportingbet.com/pt-br/sports/futebol
 """
 
 import logging
+import os
 import random
 
 from playwright.async_api import async_playwright, Response, TimeoutError as PWTimeout
@@ -42,8 +43,9 @@ class SportingbetExtractor(BaseExtractor):
 
         try:
             async with async_playwright() as pw:
+                is_headless = os.getenv("SHOW_BROWSER") != "1"
                 browser = await pw.chromium.launch(
-                    headless=True,
+                    headless=is_headless,
                     args=["--no-sandbox", "--disable-dev-shm-usage",
                           "--disable-blink-features=AutomationControlled"],
                 )
@@ -73,11 +75,35 @@ class SportingbetExtractor(BaseExtractor):
                         logger.debug(f"[Sportingbet] Erro ao parsear API: {e}")
 
                 page.on("response", handle_response)
-                await page.goto(self.SOCCER_URL, wait_until="networkidle", timeout=30_000)
+                await page.goto(self.SOCCER_URL, wait_until="domcontentloaded", timeout=45_000)
+                
+                # --- Bloco de Popups Sportingbet ---
+                try:
+                    btn_age = page.locator(".popup-age-yes").first
+                    if await btn_age.is_visible(timeout=8_000):
+                        await btn_age.click()
+                        logger.debug("[Sportingbet] ✅ Popup de idade (+18) fechado.")
+                        await page.wait_for_timeout(1_000)
+                except Exception as exc:
+                    logger.debug(f"[Sportingbet] Falha ao lidar com popup de idade: {exc}")
+
+                try:
+                    btn_cookies = page.locator("#onetrust-accept-btn-handler").first
+                    if await btn_cookies.is_visible(timeout=5_000):
+                        await btn_cookies.click()
+                        logger.debug("[Sportingbet] ✅ Banner de cookies aceito.")
+                        await page.wait_for_timeout(1_000)
+                except Exception as exc:
+                    logger.debug(f"[Sportingbet] Falha ao lidar com banner de cookies: {exc}")
+
                 await page.wait_for_timeout(random.randint(2_500, 4_000))
 
                 if not collected:
                     collected.extend(await self._fallback_dom(page, query_home, query_away))
+
+                if not collected and not is_headless:
+                    logger.debug("[Sportingbet] ⚠️ Nenhuma odd coletada. Mantendo o navegador aberto por 15s para debug visual.")
+                    await page.wait_for_timeout(15_000)
 
                 await browser.close()
 
@@ -155,20 +181,31 @@ class SportingbetExtractor(BaseExtractor):
     async def _fallback_dom(self, page, query_home: str, query_away: str) -> list[dict]:
         results = []
         try:
-            await page.wait_for_selector(self.SEL_EVENT, timeout=5_000)
-            for row in await page.locator(self.SEL_EVENT).all():
-                lines = [l.strip() for l in (await row.inner_text()).split("\n") if l.strip()]
-                if len(lines) < 2:
-                    continue
-                home, away = lines[0], lines[1]
-                if not match_is_target(home, away, query_home, query_away):
-                    continue
+            sel_card = ".grid-event-wrapper"
+            await page.wait_for_selector(sel_card, timeout=5_000)
+            cards = await page.locator(sel_card).all()
+            
+            for card in cards:
                 try:
-                    odds_els = await row.locator(self.SEL_ODDS).all()
+                    participants = await card.locator(".participant").all_inner_texts()
+                    if len(participants) < 2:
+                        continue
+                        
+                    home = participants[0].strip()
+                    away = participants[1].strip()
+                    
+                    if not match_is_target(home, away, query_home, query_away):
+                        continue
+                        
+                    # Pega as odds do primeiro grupo (1X2) que é o ms-option-group
+                    odds_group = card.locator("ms-option-group.grid-option-group").first
+                    odds_els = await odds_group.locator("span.custom-odds-value-style").all_inner_texts()
+                    
                     if len(odds_els) >= 3:
-                        hw = float((await odds_els[0].inner_text()).strip())
-                        dr = float((await odds_els[1].inner_text()).strip())
-                        aw = float((await odds_els[2].inner_text()).strip())
+                        hw = float(odds_els[0].replace(',', '.').strip())
+                        dr = float(odds_els[1].replace(',', '.').strip())
+                        aw = float(odds_els[2].replace(',', '.').strip())
+                        
                         results.append(self.build_odd_payload(
                             bookmaker=self.BOOKMAKER_NAME,
                             match_id=build_match_id(home, away),
@@ -177,7 +214,10 @@ class SportingbetExtractor(BaseExtractor):
                         ))
                         break
                 except Exception as e:
-                    logger.debug(f"[Sportingbet][DOM] {e}")
+                    logger.debug(f"[Sportingbet][DOM] Erro no card: {e}")
+        except PWTimeout:
+            logger.debug("[Sportingbet][DOM] Timeout esperando elementos da partida.")
         except Exception as e:
             logger.debug(f"[Sportingbet][DOM] Falha: {e}")
+            
         return results
